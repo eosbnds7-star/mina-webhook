@@ -1,11 +1,22 @@
+import os
+import requests
 from flask import Flask, request
+from openai import OpenAI
 
 app = Flask(__name__)
 
 VERIFY_TOKEN = "mina_webhook_2026"
 
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+INSTAGRAM_ACCESS_TOKEN = os.environ.get("INSTAGRAM_ACCESS_TOKEN")
+
+client = OpenAI(api_key=OPENAI_API_KEY)
+
+
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
+
+    # Meta webhook doğrulaması
     if request.method == "GET":
         mode = request.args.get("hub.mode")
         token = request.args.get("hub.verify_token")
@@ -16,14 +27,73 @@ def webhook():
 
         return "Forbidden", 403
 
+    # Instagram'dan gelen mesaj
     data = request.get_json()
-    print(data)
+    print("GELEN VERİ:", data)
 
-    return "EVENT_RECEIVED", 200
+    try:
+        entry = data.get("entry", [])
+
+        for item in entry:
+            messaging = item.get("messaging", [])
+
+            for message_event in messaging:
+
+                sender = message_event.get("sender", {})
+                sender_id = sender.get("id")
+
+                message = message_event.get("message", {})
+                text = message.get("text")
+
+                if not sender_id or not text:
+                    continue
+
+                print("GELEN MESAJ:", text)
+
+                # OpenAI'dan cevap al
+                response = client.responses.create(
+                    model="gpt-5-mini",
+                    instructions=(
+                        "Sen Mina'sın. Instagram'da doğal, samimi ve "
+                        "arkadaş canlısı konuşan bir AI karakterisin. "
+                        "Kısa, doğal ve sohbet havasında cevap ver."
+                    ),
+                    input=text
+                )
+
+                reply = response.output_text
+
+                print("MINA CEVABI:", reply)
+
+                # Instagram'a cevabı gönder
+                url = "https://graph.facebook.com/v23.0/me/messages"
+
+                payload = {
+                    "recipient": {
+                        "id": sender_id
+                    },
+                    "message": {
+                        "text": reply
+                    },
+                    "access_token": INSTAGRAM_ACCESS_TOKEN
+                }
+
+                result = requests.post(url, json=payload)
+
+                print("INSTAGRAM CEVAP SONUCU:", result.status_code)
+                print(result.text)
+
+        return "EVENT_RECEIVED", 200
+
+    except Exception as e:
+        print("HATA:", str(e))
+        return "EVENT_RECEIVED", 200
+
 
 @app.route("/")
 def home():
-    return "Mina webhook is running!"
+    return "Mina AI webhook is running!"
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
